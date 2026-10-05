@@ -1,356 +1,541 @@
 # AIE-CASE - Color-Invariant Saree Design Recognition
 
-A deep metric learning system for recognizing saree surface designs while reducing the effect of color and palette variations.
-
 ## 1. Project Overview
 
-This project addresses saree design recognition where the same surface design may appear in different color palettes.
+**AIE-CASE - Color-Invariant Saree Design Recognition** is a computer vision system designed to identify saree designs based on their surface patterns and motifs rather than their color palette.
 
-The goal is to learn an image embedding in which images with the same underlying visual structure remain close to each other even when their color appearance changes, while visually different designs remain farther apart.
+The central idea is similar to face recognition for textiles: two images should be considered similar when they contain the same underlying design structure, even if their colors are substantially different.
 
-The system supports two related tasks:
+The system supports two tasks:
 
-1. **Identification** - rank gallery images according to similarity to a query image.
-2. **Verification** - determine whether two images represent the same underlying visual instance or different instances.
+1. **Verification** - determine whether two saree images represent the same design.
+2. **Identification / Retrieval** - given a query saree image, rank a gallery of known designs by visual similarity.
 
-The project is implemented using PyTorch and a ResNet18-based embedding network.
+The project is implemented in **PyTorch** using a pretrained **ResNet18** backbone and a contrastive-learning embedding model.
+
+---
 
 ## 2. Objective
 
-The main objective is to learn a color-robust representation of saree surface patterns.
+The main requirement is to learn a representation in which:
 
-The desired behavior is:
+- The same design with different color palettes should have similar embeddings.
+- Different designs should have dissimilar embeddings, even when their colors are similar.
+- The learned embedding can be used for both pairwise verification and gallery-based identification.
 
-```text
-Same visual structure + different color
-                ↓
-        Similar embeddings
-                ↓
-         Small distance
-```
+This formulation follows the project brief, which describes saree design recognition as a pattern-recognition problem where design identity should be independent of color palette.
 
-while:
+---
 
-```text
-Different visual structure
-                ↓
-        Different embeddings
-                ↓
-         Larger distance
-```
+## 3. Approach
 
-The project therefore uses metric learning rather than treating the problem only as a conventional four-class classification task.
+### 500-Character Approach Note
 
-## 3. Project Requirements
+> We learn a color-invariant saree design embedding with a pretrained ResNet18 and contrastive loss. Each training image is augmented into multiple synthetic palette variants while preserving motif structure. Positive pairs are variants of the same source design; negatives come from different design groups. A 256-D L2-normalized embedding supports verification by Euclidean distance and gallery identification by nearest-neighbor ranking. Evaluation uses disjoint train/validation/test design groups and reports verification and retrieval metrics.
 
-- PyTorch-based implementation
-- End-to-end training and inference pipeline
-- Image embedding generation
-- Verification using embedding distance
-- Gallery-based identification/retrieval
-- Evaluation on held-out validation and test splits
-- Color augmentation to encourage color invariance
-- Pretrained ResNet18 backbone
-- Reproducible project structure
+---
 
 ## 4. Dataset
 
+Two datasets were considered according to the project brief.
+
 ### 4.1 Indian Fabric Patterns Dataset
 
-The Indian Fabric Patterns dataset contains four pattern categories:
+The Indian Fabric Patterns dataset contains four saree/fabric pattern categories:
 
 - Banarasi
 - Bandhani
 - Ikat
 - Pichwai
 
-The dataset contains 1,468 images in total and is organized into train, validation, and test folders.
+The dataset contains **1,468 images** after extraction.
 
-The dataset README reports automatic orientation correction and resizing to 640 x 640 pixels.
+| Split      | Banarasi | Bandhani |    Ikat | Pichwai |     Total |
+| ---------- | -------: | -------: | ------: | ------: | --------: |
+| Train      |      432 |      279 |     303 |     279 |     1,293 |
+| Validation |       43 |       22 |      26 |      24 |       115 |
+| Test       |       14 |       15 |      13 |      18 |        60 |
+| **Total**  |  **489** |  **316** | **342** | **321** | **1,468** |
 
 ### 4.2 DeepLure Saree Corpus
 
-The project also provides access to a proprietary DeepLure saree corpus.
+The DeepLure saree corpus was also inspected as an additional source.
 
-The DeepLure data was inspected locally during development but is **not included in this repository** because it is proprietary and must not be redistributed.
+The local copy used during development contained:
 
-## 5. Dataset Preparation
+- `handloom_sarees`: 165 JPG images
+- `normal_sarees`: 0 images
 
-The Indian Fabric Patterns dataset was used for the main controlled training and evaluation experiment.
+The DeepLure data did not provide sufficiently clear design labels for the contrastive pair construction used in the final controlled experiment. Therefore, the final training/evaluation protocol uses the labeled Indian Fabric Patterns dataset.
 
-The train, validation, and test groups were checked to ensure that there was no group overlap.
+**Important:** The DeepLure dataset is proprietary and must not be redistributed. It is excluded from the Git repository.
+
+---
+
+## 5. Dataset Inspection
+
+Several preprocessing and inspection steps were performed:
+
+- Image count and dimension inspection
+- Contact-sheet generation
+- Duplicate inspection
+- Metadata creation
+- Group inspection
+- Train/validation/test overlap checking
+
+The final split organization contains:
+
+- **431 training design groups**
+- **115 validation design groups**
+- **60 test design groups**
+
+No group overlap was found between the train, validation, and test splits.
+
+---
+
+## 6. Color-Invariance Strategy
+
+The original dataset does not provide enough real-world examples of the exact same saree design photographed or manufactured in substantially different colorways.
+
+Therefore, a controlled synthetic color-variant generation step was introduced.
+
+For each source image, three color variants are generated while preserving the spatial arrangement and motif structure.
+
+The transformation changes:
+
+- Hue
+- Saturation
+- Brightness
+- Contrast
+
+Each source design therefore has:
 
 ```text
-Train groups:       431
-Validation groups:  115
-Test groups:         60
-
-Train ∩ Validation: 0
-Train ∩ Test:       0
-Validation ∩ Test:  0
+Original
+├── Color Variant 1
+├── Color Variant 2
+└── Color Variant 3
 ```
 
-## 6. Color Invariance Strategy
+These transformations are intended to simulate palette changes while keeping the underlying design structure unchanged.
 
-Since verified real-world pairs containing the same saree design in different colorways were not available in the provided labeled data, controlled color transformations were used to simulate palette changes.
+### Important Limitation
 
-The training pipeline uses:
+The color variants are **synthetically generated**. They are not independent photographs or physically manufactured sarees of the same design in different colorways.
+
+Therefore, the current experiment demonstrates controlled color-invariance rather than proving complete real-world colorway invariance.
+
+---
+
+## 7. Color-Variant Generation
+
+The script:
 
 ```text
-ColorJitter(
-    brightness=0.25,
-    contrast=0.25,
-    saturation=0.6,
-    hue=0.08
-)
+src/create_color_variants.py
 ```
 
-Random horizontal flipping is also applied during training.
+generates three synthetic color variants for every source design group.
 
-These transformations encourage the model to focus more strongly on structural and textural information rather than exact RGB values.
+Generated data:
 
-## 7. Model Architecture
+| Split      | Design Groups | Generated Variants |
+| ---------- | ------------: | -----------------: |
+| Train      |           431 |              1,293 |
+| Validation |           115 |                345 |
+| Test       |            60 |                180 |
 
-The model uses a pretrained ResNet18 backbone.
+Each group contains four images:
 
 ```text
-Input Image
-     |
-     v
-Resize 224 x 224
-     |
-     v
-ResNet18 Backbone
-     |
-     v
-512-dimensional feature
-     |
-     v
-Linear(512 -> 512)
-     |
-     v
+original.jpg
+color_variant_1.jpg
+color_variant_2.jpg
+color_variant_3.jpg
+```
+
+The generated variants are stored under:
+
+```text
+data/color_variants/
+```
+
+This directory is ignored by Git.
+
+---
+
+## 8. Pair Construction
+
+For each design group containing four versions, all six possible image combinations are treated as positive pairs.
+
+For four images:
+
+```text
+4 choose 2 = 6 positive pairs
+```
+
+Negative pairs are created by pairing images belonging to different design groups. The number of negative pairs is balanced with the number of positive pairs.
+
+### Final Pair Counts
+
+| Split      | Positive | Negative | Total |
+| ---------- | -------: | -------: | ----: |
+| Train      |    2,586 |    2,586 | 5,172 |
+| Validation |      690 |      690 | 1,380 |
+| Test       |      360 |      360 |   720 |
+
+The pair-generation script also checks that positive pairs do not accidentally contain images from different design groups.
+
+---
+
+## 9. Model Architecture
+
+The model uses a pretrained **ResNet18** as the feature extractor.
+
+```text
+Input RGB Image
+       |
+       v
+Resize to 224 x 224
+       |
+       v
+Pretrained ResNet18
+       |
+       v
+Feature Vector
+       |
+       v
+Linear Layer: 512
+       |
+       v
 ReLU
-     |
-     v
-Dropout(0.2)
-     |
-     v
-Linear(512 -> 256)
-     |
-     v
+       |
+       v
+Dropout: 0.2
+       |
+       v
+Linear Layer: 256
+       |
+       v
 L2 Normalization
-     |
-     v
-256-dimensional embedding
+       |
+       v
+256-D Saree Design Embedding
 ```
 
-The final embedding dimension is **256**.
+The final embedding has **256 dimensions**.
 
-## 8. Metric Learning
+The ResNet18 classification layer is replaced with an embedding head, and the final embedding is L2-normalized.
 
-The model learns an embedding space instead of directly predicting only the four dataset classes.
+---
 
-For two images:
+## 10. Contrastive Learning
+
+For a pair of embeddings:
 
 ```text
-Image 1 -> Embedding 1
-Image 2 -> Embedding 2
+z1 = embedding(image1)
+z2 = embedding(image2)
 ```
 
-their Euclidean distance is calculated.
+the Euclidean distance between the embeddings is calculated.
 
-- Positive pair -> small distance
-- Negative pair -> larger distance
-
-## 9. Contrastive Loss
-
-The project uses contrastive loss with a margin of **1.0**.
-
-For a positive pair, the loss encourages the embedding distance to approach zero.
-
-For a negative pair, the loss penalizes distances that remain below the margin.
-
-## 10. Pair Construction
-
-### Training
+For a positive pair:
 
 ```text
-Positive pairs: 1293
-Negative pairs: 1293
-Total pairs:    2586
+same design -> embeddings should be close
 ```
 
-### Validation
+For a negative pair:
 
 ```text
-Positive pairs: 115
-Negative pairs: 115
-Total pairs:    230
+different design -> embeddings should be separated
 ```
 
-### Test
+The training uses a contrastive-loss margin of:
 
 ```text
-Positive pairs: 60
-Negative pairs: 60
-Total pairs:    120
+Margin = 1.0
 ```
 
-For validation and test, positive pairs consist of the same image under independent controlled color transformations.
+---
 
-## 11. Training
+## 11. Training Configuration
 
-The training configuration was:
+| Parameter           | Value            |
+| ------------------- | ---------------- |
+| Backbone            | ResNet18         |
+| Pretrained weights  | ImageNet         |
+| Embedding dimension | 256              |
+| Loss                | Contrastive Loss |
+| Margin              | 1.0              |
+| Optimizer           | AdamW            |
+| Learning rate       | 1e-4             |
+| Weight decay        | 1e-4             |
+| Batch size          | 8                |
+| Epochs              | 5                |
+| Input size          | 224 × 224        |
+| Dropout             | 0.2              |
+
+During the final experiment, the pretrained ResNet18 backbone was frozen and the embedding head was trained.
+
+---
+
+## 12. Training Result
+
+The final color-invariant model was trained on **5,172 training pairs**.
+
+| Epoch | Average Loss |
+| ----: | -----------: |
+|     1 |       0.1883 |
+|     2 |       0.1324 |
+|     3 |       0.1156 |
+|     4 |       0.1052 |
+|     5 |       0.0969 |
+
+The trained model is saved as:
 
 ```text
-Backbone:           ResNet18
-Embedding size:     256
-Batch size:         8
-Epochs:             5
-Learning rate:      0.0001
-Optimizer:          AdamW
-Weight decay:       0.0001
-Contrastive margin: 1.0
+models/saree_color_invariant_model.pth
 ```
 
-The pretrained ResNet18 backbone was frozen for this baseline experiment while the embedding head was trained.
+---
 
-Training loss:
+## 13. Verification Evaluation
+
+Verification asks:
+
+> Are these two saree images from the same design?
+
+A Euclidean embedding-distance threshold of:
 
 ```text
-Epoch 1: 0.1907
-Epoch 2: 0.1486
-Epoch 3: 0.1304
-Epoch 4: 0.1180
-Epoch 5: 0.1101
+0.5
 ```
 
-The trained model was saved as:
+was used for the reported verification results.
+
+If:
 
 ```text
-models/saree_embedding_model.pth
+distance <= 0.5
 ```
 
-## 12. Verification
+the pair is classified as the same design.
 
-Verification determines whether two images should be considered similar.
-
-The Euclidean distance between their normalized embeddings is calculated.
+Otherwise:
 
 ```text
-Threshold = 0.5
+distance > 0.5
 ```
 
-Decision rule:
+the pair is classified as different designs.
+
+---
+
+## 14. Validation Results
+
+The validation set contains:
+
+- 690 positive pairs
+- 690 negative pairs
+- 1,380 total pairs
+
+| Metric                    |     Result |
+| ------------------------- | ---------: |
+| Accuracy                  | **95.58%** |
+| Precision                 | **92.10%** |
+| Recall                    | **99.71%** |
+| F1 Score                  | **95.76%** |
+| ROC-AUC                   | **0.9958** |
+| Average Positive Distance | **0.2153** |
+| Average Negative Distance | **0.8230** |
+
+Confusion matrix:
 
 ```text
-distance < 0.5  -> Same
-distance >= 0.5 -> Different
+[[631, 59],
+ [  2, 688]]
 ```
 
-## 13. Verification Results
+---
 
-### Validation Set
+## 15. Test Verification Results
+
+The held-out test set contains:
+
+- 360 positive pairs
+- 360 negative pairs
+- 720 total pairs
+
+| Metric                    |     Result |
+| ------------------------- | ---------: |
+| Accuracy                  | **95.56%** |
+| Precision                 | **93.62%** |
+| Recall                    | **97.78%** |
+| F1 Score                  | **95.65%** |
+| ROC-AUC                   | **0.9930** |
+| Average Positive Distance | **0.2327** |
+| Average Negative Distance | **0.8158** |
+
+Confusion matrix:
 
 ```text
-Positive pairs: 115
-Negative pairs: 115
-
-Average positive distance: 0.1769
-Average negative distance: 0.8036
-
-Accuracy:  95.22%
-Precision: 91.94%
-Recall:    99.13%
-F1-score:  95.40%
-ROC-AUC:   0.9935
+[[336, 24],
+ [  8, 352]]
 ```
 
-Validation confusion matrix:
+These results show strong separation between same-design and different-design pairs under the controlled synthetic color-variation setting.
+
+---
+
+## 16. Identification / Retrieval
+
+Verification alone does not answer:
+
+> Which known saree design is this query image?
+
+Therefore, a gallery-based retrieval experiment was performed.
+
+### Gallery
+
+The gallery contains:
+
+- 60 held-out test design groups
+- One original image per design group
+
+### Queries
+
+For each of the 60 design groups:
+
+- 3 synthetic color variants are used as queries
+
+Total:
 
 ```text
-                 Predicted
-                 Different  Same
-
-Actual Different     105      10
-Actual Same            1     114
+60 x 3 = 180 queries
 ```
 
-### Test Set
+For each query, its embedding is compared with every gallery embedding and the gallery designs are ranked by Euclidean distance.
+
+---
+
+## 17. Retrieval Results
+
+| Metric                          |     Result |
+| ------------------------------- | ---------: |
+| Number of Gallery Designs       |         60 |
+| Number of Queries               |        180 |
+| Recall@1                        | **81.11%** |
+| Recall@5                        | **97.22%** |
+| Average Correct-Design Distance | **0.2357** |
+
+### Interpretation
+
+**Recall@1 = 81.11%**
+
+For approximately 81% of synthetic color-variant queries, the correct design was ranked first.
+
+**Recall@5 = 97.22%**
+
+For approximately 97% of queries, the correct design appeared within the top five retrieved gallery designs.
+
+This indicates that the learned embedding captures useful design-level information while remaining reasonably robust to the synthetic color transformations used in this experiment.
+
+---
+
+## 18. Verification vs Identification
+
+### Verification
+
+Input:
 
 ```text
-Positive pairs: 60
-Negative pairs: 60
-
-Average positive distance: 0.1620
-Average negative distance: 0.7974
-
-Accuracy:  97.50%
-Precision: 95.24%
-Recall:    100.00%
-F1-score:  97.56%
-ROC-AUC:   0.9892
+Image A + Image B
 ```
 
-Test confusion matrix:
+Output:
 
 ```text
-                 Predicted
-                 Different  Same
-
-Actual Different      57       3
-Actual Same            0      60
+Same Design / Different Design
 ```
 
-### Verification Summary
+Metrics:
 
-| Metric    | Validation |        Test |
-| --------- | ---------: | ----------: |
-| Accuracy  |     95.22% |  **97.50%** |
-| Precision |     91.94% |  **95.24%** |
-| Recall    |     99.13% | **100.00%** |
-| F1-score  |     95.40% |  **97.56%** |
-| ROC-AUC   |     0.9935 |  **0.9892** |
+- Accuracy
+- Precision
+- Recall
+- F1
+- ROC-AUC
 
-## 14. Identification / Retrieval
+### Identification
 
-Identification compares a query embedding against a gallery of embeddings and ranks gallery images by Euclidean distance.
-
-For the controlled test experiment:
-
-- Gallery contains the 60 test images.
-- A color-transformed version of each test image is used as the query.
-- The correct original image is expected to appear at the highest ranking.
-
-## 15. Identification Results
+Input:
 
 ```text
-Number of queries: 60
-
-Recall@1: 100.00%
-Recall@5: 100.00%
-
-Average query-to-correct-gallery distance: 0.1337
+Query Image + Gallery
 ```
 
-Every color-transformed query retrieved its corresponding original image at Rank 1 in this controlled evaluation.
+Output:
 
-## 16. Important Evaluation Limitation
+```text
+Ranked list of candidate designs
+```
 
-The available labeled dataset does not provide verified real-world identity labels for independent photographs of the same saree design in different color palettes.
+Metrics:
 
-Therefore, the current evaluation uses controlled color transformations of the same test image to test color robustness.
+- Recall@1
+- Recall@5
+- Retrieval distance
 
-The reported results should therefore be interpreted as performance on controlled color-invariance and instance-level retrieval experiments.
+The project evaluates both capabilities.
 
-They should **not** be interpreted as proof of 100% real-world recognition of independently photographed sarees with the same design but different colorways.
+---
 
-A stronger future evaluation would require a dataset containing verified design identities with multiple independently photographed color variants for each design.
+## 19. Data Leakage Prevention
 
-## 17. Project Structure
+Data leakage is important because multiple images can originate from the same source design.
+
+The dataset was split at the **design-group level** before creating synthetic variants.
+
+Therefore:
+
+```text
+Train groups
+    !=
+Validation groups
+    !=
+Test groups
+```
+
+Synthetic variants of a source image remain within the same split.
+
+Final split:
+
+- 431 training groups
+- 115 validation groups
+- 60 test groups
+
+No train/validation/test group overlap was found.
+
+---
+
+## 20. Project Structure
 
 ```text
 saree-design-recognition/
+│
+├── data/
+│   ├── indian_saree_patterns/
+│   ├── sarees_dataset/
+│   └── color_variants/
+│
+├── models/
+│   └── saree_color_invariant_model.pth
+│
+├── notebooks/
+│
+├── results/
 │
 ├── src/
 │   ├── inspect_dataset.py
@@ -360,193 +545,246 @@ saree-design-recognition/
 │   ├── inspect_groups.py
 │   ├── color_augmentation.py
 │   ├── dataset.py
-│   ├── test_dataset.py
 │   ├── pair_dataset.py
 │   ├── pair_torch_dataset.py
 │   ├── test_pair_dataset.py
 │   ├── model.py
-│   ├── test_model.py
 │   ├── loss.py
-│   ├── test_loss.py
 │   ├── train.py
 │   ├── evaluate.py
 │   ├── evaluate_retrieval.py
-│   └── check_split_overlap.py
+│   ├── create_color_variants.py
+│   ├── create_color_pairs.py
+│   ├── color_pair_torch_dataset.py
+│   ├── test_color_pair_dataset.py
+│   ├── train_color_invariance.py
+│   ├── evaluate_color_invariance.py
+│   └── evaluate_color_retrieval.py
 │
-├── models/
-│   └── saree_embedding_model.pth
-│
-├── results/
-├── notebooks/
-├── README.md
-├── requirements.txt
 ├── .gitignore
-└── LICENSE
+├── requirements.txt
+└── README.md
 ```
 
-The dataset itself is not included in the repository.
+The `data/` directory is ignored by Git so that datasets are not uploaded to the repository.
 
-## 18. Installation
+The proprietary DeepLure images must not be committed or redistributed.
 
-Clone the repository:
+---
+
+## 21. Installation
+
+### Clone the repository
 
 ```bash
 git clone https://github.com/sunil11122251/saree-design-recognition.git
-```
-
-Move into the project:
-
-```bash
 cd saree-design-recognition
 ```
 
-Create a Python virtual environment:
+### Create a Python environment
+
+Python 3.10 was used during development.
 
 ```bash
-python -m venv venv
+py -3.10 -m venv venv
 ```
 
-Activate it on Windows PowerShell:
+Windows PowerShell:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 venv\Scripts\Activate.ps1
 ```
 
-Install dependencies:
+### Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 19. Dataset Setup
+---
 
-The required datasets must be obtained separately according to their respective access and licensing conditions.
+## 22. Running the Pipeline
 
-Place available datasets under:
-
-```text
-data/
-```
-
-The proprietary DeepLure dataset must not be redistributed through this repository.
-
-## 20. Training
-
-After preparing the dataset and metadata:
+### Step 1 - Inspect the dataset
 
 ```bash
-python src/train.py
+python src/inspect_dataset.py
 ```
 
-The trained model is saved as:
-
-```text
-models/saree_embedding_model.pth
-```
-
-## 21. Verification Evaluation
-
-Run:
+### Step 2 - Create metadata
 
 ```bash
-python src/evaluate.py
+python src/create_metadata.py
 ```
 
-This reports:
-
-- Accuracy
-- Precision
-- Recall
-- F1-score
-- ROC-AUC
-- Average positive distance
-- Average negative distance
-- Confusion matrix
-
-## 22. Identification Evaluation
-
-Run:
+### Step 3 - Inspect source groups
 
 ```bash
-python src/evaluate_retrieval.py
+python src/inspect_groups.py
 ```
 
-This reports:
+### Step 4 - Generate synthetic color variants
 
-- Recall@1
-- Recall@5
-- Average query-to-correct-gallery distance
+```bash
+python src/create_color_variants.py
+```
 
-## 23. Reproducibility
+### Step 5 - Create positive and negative pairs
 
-Dependencies are listed in:
+```bash
+python src/create_color_pairs.py
+```
+
+### Step 6 - Test the PyTorch pair dataset
+
+```bash
+python src/test_color_pair_dataset.py
+```
+
+### Step 7 - Train the color-invariant model
+
+```bash
+python src/train_color_invariance.py
+```
+
+### Step 8 - Evaluate verification
+
+```bash
+python src/evaluate_color_invariance.py
+```
+
+### Step 9 - Evaluate identification/retrieval
+
+```bash
+python src/evaluate_color_retrieval.py
+```
+
+---
+
+## 23. Requirements
 
 ```text
-requirements.txt
+torch
+torchvision
+torchaudio
+numpy
+pandas
+Pillow
+scikit-learn
+matplotlib
+tqdm
 ```
 
-The repository contains source code for:
+The project is implemented in PyTorch as required by the project brief.
 
-- Dataset processing
-- Pair construction
-- Color augmentation
+---
+
+## 24. Reproducibility
+
+The repository contains code for:
+
+- Dataset inspection
+- Metadata generation
+- Synthetic color-variant creation
+- Pair generation
+- PyTorch dataset loading
 - Model definition
-- Contrastive loss
-- Training
-- Verification
-- Identification/retrieval
+- Contrastive-loss training
+- Verification evaluation
+- Retrieval evaluation
 
-## 24. Technologies Used
+The trained model checkpoint is included separately from the datasets.
 
-- Python
-- PyTorch
-- Torchvision
-- ResNet18
-- Contrastive Learning
-- Metric Learning
-- Image Embeddings
-- Euclidean Distance
-- ColorJitter
-- Scikit-learn
-- Pandas
-- NumPy
-- Pillow
+Dataset files are intentionally not included in the repository.
 
-## 25. Future Improvements
+---
 
-1. Collect verified same-design/different-color saree pairs.
-2. Train with multiple independent photographs per design.
-3. Fine-tune the ResNet18 backbone.
-4. Add harder negative pairs from visually similar designs.
-5. Evaluate with larger galleries.
-6. Report additional retrieval metrics such as mAP.
-7. Test additional metric-learning objectives such as Triplet Loss or ArcFace-style objectives.
-8. Evaluate cross-dataset generalization.
-9. Measure inference time and embedding generation efficiency.
+## 25. Limitations
 
-## 26. Conclusion
+### 25.1 Synthetic color variants
 
-This project implements a deep metric learning pipeline for color-robust saree surface design recognition.
+The main color-invariance evaluation uses controlled synthetic transformations rather than independently photographed or manufactured sarees with the same design in different colorways.
 
-A ResNet18 backbone with a 256-dimensional normalized embedding was trained using contrastive loss and color augmentation.
+Therefore, the reported results demonstrate robustness to controlled palette changes, not complete real-world colorway invariance.
 
-On the controlled held-out test experiment, the model achieved:
+### 25.2 Limited labeled design groups
+
+The final retrieval evaluation contains 60 held-out test design groups.
+
+A larger gallery with more unique designs would provide a stronger measure of practical identification performance.
+
+### 25.3 Retrieval performance
+
+The final retrieval performance is:
 
 ```text
-Verification Accuracy: 97.50%
-Verification Precision: 95.24%
-Verification Recall: 100.00%
-Verification F1-score: 97.56%
-Verification ROC-AUC: 0.9892
-
-Identification Recall@1: 100.00%
-Identification Recall@5: 100.00%
+Recall@1 = 81.11%
+Recall@5 = 97.22%
 ```
 
-The results indicate that the learned embedding successfully maintains similarity under the controlled color transformations used in this experiment.
+The correct design is therefore often retrieved among the top candidates, but it is not always ranked first.
 
-The main limitation is the absence of verified real-world same-design/different-color identity labels in the available evaluation data. Future work should evaluate the approach on a dataset containing independently photographed sarees with verified design identities and multiple colorways.
+### 25.4 Real-world variation
 
-## 27. Project Status
+Future evaluation should include real images of the same design under:
 
-**Status: Completed baseline end-to-end implementation and controlled evaluation.**
+- Different colorways
+- Different lighting
+- Different camera devices
+- Different scales
+- Different viewpoints
+- Fabric folds
+- Background variation
+
+---
+
+## 26. Future Improvements
+
+1. Use real same-design/different-color image pairs.
+2. Fine-tune the ResNet18 backbone.
+3. Compare stronger pretrained backbones.
+4. Use triplet loss or supervised contrastive loss.
+5. Add hard-negative mining.
+6. Use multiple gallery images per design.
+7. Increase the number of unique design identities.
+8. Evaluate cross-dataset generalization.
+9. Add precision-recall and ROC curves.
+10. Benchmark inference speed and model size.
+11. Investigate texture-specific feature extractors.
+12. Use segmentation or cropping to focus on the saree surface rather than background regions.
+
+---
+
+## 27. Conclusion
+
+This project implements a complete prototype for **color-invariant saree design recognition** using metric learning.
+
+The system:
+
+- Extracts visual design embeddings using a pretrained ResNet18.
+- Uses a 256-dimensional normalized embedding space.
+- Trains with contrastive loss.
+- Generates controlled synthetic color variants to encourage color invariance.
+- Performs pairwise design verification.
+- Performs gallery-based design identification.
+- Uses group-level train/validation/test separation to avoid source-image leakage.
+
+### Final Held-Out Verification
+
+```text
+Accuracy  : 95.56%
+Precision : 93.62%
+Recall    : 97.78%
+F1 Score  : 95.65%
+ROC-AUC   : 0.9930
+```
+
+### Final Controlled Color-Variant Retrieval
+
+```text
+Recall@1 : 81.11%
+Recall@5 : 97.22%
+```
+
+The results demonstrate that the learned embedding captures useful saree design similarity and provides strong robustness to the synthetic color transformations used in this experiment.
